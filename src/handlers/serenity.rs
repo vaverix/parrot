@@ -1,8 +1,8 @@
 use crate::{
     commands::{
         autopause::*, clear::*, leave::*, manage_sources::*, now_playing::*, pause::*, play::*,
-        queue::*, remove::*, repeat::*, resume::*, seek::*, shuffle::*, skip::*, stop::*,
-        summon::*, version::*, voteskip::*,
+        queue::*, remove::*, repeat::*, repeat_queue::*, resume::*, seek::*, shuffle::*, skip::*,
+        stop::*, summon::*, version::*, voteskip::*,
     },
     connection::{check_voice_connections, Connection},
     errors::ParrotError,
@@ -224,6 +224,11 @@ impl SerenityHandler {
                         .name("repeat")
                         .description("Toggles looping for the current track")
                 })
+                .create_application_command(|command|{
+                    command
+                        .name("repeatqueue")
+                        .description("Toggles looping for the queue")
+                })
                 .create_application_command(|command| {
                     command
                         .name("resume")
@@ -324,8 +329,8 @@ impl SerenityHandler {
         let bot_id = ctx.cache.current_user_id();
 
         match command_name {
-            "autopause" | "clear" | "leave" | "pause" | "remove" | "repeat" | "resume" | "seek"
-            | "shuffle" | "skip" | "stop" | "voteskip" => {
+            "autopause" | "clear" | "leave" | "pause" | "remove" | "repeat" | "repeatqueue"
+            | "resume" | "seek" | "shuffle" | "skip" | "stop" | "voteskip" => {
                 match check_voice_connections(&guild, &user_id, &bot_id) {
                     Connection::User(_) | Connection::Neither => Err(ParrotError::NotConnected),
                     Connection::Bot(bot_channel_id) => {
@@ -369,6 +374,7 @@ impl SerenityHandler {
             "queue" => queue(ctx, command).await,
             "remove" => remove(ctx, command).await,
             "repeat" => repeat(ctx, command).await,
+            "repeatqueue" => repeat_queue(ctx, command).await,
             "resume" => resume(ctx, command).await,
             "seek" => seek(ctx, command).await,
             "shuffle" => shuffle(ctx, command).await,

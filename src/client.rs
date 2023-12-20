@@ -4,7 +4,7 @@ use songbird::serenity::SerenityInit;
 use std::{collections::HashMap, env, error::Error};
 
 use crate::{
-    guild::{cache::GuildCacheMap, settings::GuildSettingsMap},
+    guild::{cache::GuildCacheMap, settings::GuildSettingsMap, stored_queue::GuildStoredQueueMap},
     handlers::SerenityHandler,
 };
 
@@ -34,6 +34,8 @@ impl Client {
         let mut data = client.data.write().await;
         data.insert::<GuildCacheMap>(HashMap::default());
         data.insert::<GuildSettingsMap>(HashMap::default());
+        data.insert::<GuildStoredQueueMap>(HashMap::default());
+
         drop(data);
 
         Ok(Client { client })
