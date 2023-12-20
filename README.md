@@ -13,6 +13,10 @@
   <a href="https://github.com/aquelemiguel/parrot/"><img src="https://img.shields.io/badge/rustc-1.65-blue.svg"></a>
 </p>
 
+<p align="center">
+  The project has additional command <code>/repeatqueue</code>
+</p>
+
 ## Deployment
 
 ### Usage
