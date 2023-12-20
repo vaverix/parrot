@@ -61,6 +61,7 @@ pub async fn summon(
         handler.add_global_event(
             Event::Track(TrackEvent::End),
             TrackEndHandler {
+                http: ctx.http.clone(),
                 guild_id: guild.id,
                 call: call.clone(),
                 ctx_data: ctx.data.clone(),
