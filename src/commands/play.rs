@@ -1,7 +1,10 @@
 use crate::{
     commands::{skip::force_skip_top_track, summon::summon},
     errors::{verify, ParrotError},
-    guild::settings::{GuildSettings, GuildSettingsMap},
+    guild::{
+        settings::{GuildSettings, GuildSettingsMap},
+        stored_queue::{GuildStoredQueue, GuildStoredQueueMap},
+    },
     handlers::track_end::update_queue_messages,
     messaging::message::ParrotMessage,
     messaging::messages::{
@@ -17,12 +20,17 @@ use crate::{
     },
 };
 use serenity::{
-    builder::CreateEmbed, client::Context,
-    model::application::interaction::application_command::ApplicationCommandInteraction,
+    builder::CreateEmbed,
+    client::Context,
+    http::Http,
+    model::{
+        application::interaction::application_command::ApplicationCommandInteraction, id::GuildId,
+    },
     prelude::Mutex,
 };
-use songbird::{input::Restartable, tracks::TrackHandle, Call};
+use songbird::{input::Restartable, tracks::TrackHandle, typemap::TypeMap, Call};
 use std::{cmp::Ordering, error::Error as StdError, sync::Arc, time::Duration};
+use tokio::sync::RwLock;
 use url::Url;
 
 #[derive(Clone, Copy)]
@@ -35,7 +43,7 @@ pub enum Mode {
     Jump,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum QueryType {
     Keywords(String),
     KeywordList(Vec<String>),
@@ -149,6 +157,16 @@ pub async fn play(
         ParrotError::Other("Something went wrong while parsing your query!"),
     )?;
 
+    let mut data = ctx.data.write().await;
+    let stored_queue_map = data.get_mut::<GuildStoredQueueMap>().unwrap();
+    let guild_stored_queue = stored_queue_map
+        .entry(guild_id)
+        .or_insert_with(|| GuildStoredQueue::new());
+
+    guild_stored_queue.queue.push(query_type.clone());
+    guild_stored_queue.continue_play = true;
+    drop(data);
+
     // reply with a temporary message while we fetch the source
     // needed because interactions must be replied within 3s and queueing takes longer
     create_response(&ctx.http, interaction, ParrotMessage::Search).await?;
@@ -158,31 +176,10 @@ pub async fn play(
     drop(handler);
 
     match mode {
-        Mode::End => match query_type.clone() {
-            QueryType::Keywords(_) | QueryType::VideoLink(_) => {
-                let queue = enqueue_track(&call, &query_type).await?;
-                update_queue_messages(&ctx.http, &ctx.data, &queue, guild_id).await;
-            }
-            QueryType::PlaylistLink(url) => {
-                let urls = YouTubeRestartable::ytdl_playlist(&url, mode)
-                    .await
-                    .ok_or(ParrotError::Other("failed to fetch playlist"))?;
-
-                for url in urls.iter() {
-                    let Ok(queue) = enqueue_track(&call, &QueryType::VideoLink(url.to_string())).await else {
-                        continue;
-                    };
-                    update_queue_messages(&ctx.http, &ctx.data, &queue, guild_id).await;
-                }
-            }
-            QueryType::KeywordList(keywords_list) => {
-                for keywords in keywords_list.iter() {
-                    let queue =
-                        enqueue_track(&call, &QueryType::Keywords(keywords.to_string())).await?;
-                    update_queue_messages(&ctx.http, &ctx.data, &queue, guild_id).await;
-                }
-            }
-        },
+        Mode::End => {
+            normal_query_type_resolver(&call, &ctx.http, &ctx.data, guild_id, &query_type, mode)
+                .await?
+        }
         Mode::Next => match query_type.clone() {
             QueryType::Keywords(_) | QueryType::VideoLink(_) => {
                 let queue = insert_track(&call, &query_type, 1).await?;
@@ -194,7 +191,8 @@ pub async fn play(
                     .ok_or(ParrotError::Other("failed to fetch playlist"))?;
 
                 for (idx, url) in urls.into_iter().enumerate() {
-                    let Ok(queue) = insert_track(&call, &QueryType::VideoLink(url), idx + 1).await else {
+                    let Ok(queue) = insert_track(&call, &QueryType::VideoLink(url), idx + 1).await
+                    else {
                         continue;
                     };
                     update_queue_messages(&ctx.http, &ctx.data, &queue, guild_id).await;
@@ -227,7 +225,9 @@ pub async fn play(
                 let mut insert_idx = 1;
 
                 for (i, url) in urls.into_iter().enumerate() {
-                    let Ok(mut queue) = insert_track(&call, &QueryType::VideoLink(url), insert_idx).await else {
+                    let Ok(mut queue) =
+                        insert_track(&call, &QueryType::VideoLink(url), insert_idx).await
+                    else {
                         continue;
                     };
 
@@ -465,4 +465,43 @@ async fn rotate_tracks(
     });
 
     Ok(handler.queue().current_queue())
+}
+
+pub async fn normal_query_type_resolver(
+    call: &Arc<Mutex<Call>>,
+    http: &Arc<Http>,
+    data: &Arc<RwLock<TypeMap>>,
+    guild_id: GuildId,
+    query_type: &QueryType,
+    mode: Mode,
+) -> Result<(), ParrotError> {
+    match query_type.clone() {
+        QueryType::Keywords(_) | QueryType::VideoLink(_) => {
+            let queue = enqueue_track(&call, &query_type).await?;
+            update_queue_messages(http, data, &queue, guild_id).await;
+            Ok(())
+        }
+        QueryType::PlaylistLink(url) => {
+            let urls = YouTubeRestartable::ytdl_playlist(&url, mode)
+                .await
+                .ok_or(ParrotError::Other("failed to fetch playlist"))?;
+
+            for url in urls.iter() {
+                let Ok(queue) = enqueue_track(&call, &QueryType::VideoLink(url.to_string())).await
+                else {
+                    continue;
+                };
+                update_queue_messages(http, data, &queue, guild_id).await;
+            }
+            Ok(())
+        }
+        QueryType::KeywordList(keywords_list) => {
+            for keywords in keywords_list.iter() {
+                let queue =
+                    enqueue_track(&call, &QueryType::Keywords(keywords.to_string())).await?;
+                update_queue_messages(http, data, &queue, guild_id).await;
+            }
+            Ok(())
+        }
+    }
 }
