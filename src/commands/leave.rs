@@ -14,14 +14,11 @@ pub async fn leave(
     let guild_id = interaction.guild_id.unwrap();
     let manager = songbird::get(ctx).await.unwrap();
     let mut data = ctx.data.write().await;
-    match data.get_mut::<GuildStoredQueueMap>() {
-        Some(stored_queue) => match stored_queue.get_mut(&guild_id) {
-            Some(guild_stored_queue) => {
-                guild_stored_queue.queue.clear();
-            }
-            None => (),
-        },
-        _ => (),
+
+    if let Some(stored_queue) = data.get_mut::<GuildStoredQueueMap>() {
+        if let Some(guild_stored_queue) = stored_queue.get_mut(&guild_id) {
+            guild_stored_queue.queue.clear();
+        }
     }
 
     drop(data);

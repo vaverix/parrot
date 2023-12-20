@@ -161,7 +161,7 @@ pub async fn play(
     let stored_queue_map = data.get_mut::<GuildStoredQueueMap>().unwrap();
     let guild_stored_queue = stored_queue_map
         .entry(guild_id)
-        .or_insert_with(|| GuildStoredQueue::new());
+        .or_insert_with(GuildStoredQueue::new);
 
     guild_stored_queue.queue.push(query_type.clone());
     guild_stored_queue.continue_play = true;
@@ -477,7 +477,7 @@ pub async fn normal_query_type_resolver(
 ) -> Result<(), ParrotError> {
     match query_type.clone() {
         QueryType::Keywords(_) | QueryType::VideoLink(_) => {
-            let queue = enqueue_track(&call, &query_type).await?;
+            let queue = enqueue_track(call, query_type).await?;
             update_queue_messages(http, data, &queue, guild_id).await;
             Ok(())
         }
@@ -487,7 +487,7 @@ pub async fn normal_query_type_resolver(
                 .ok_or(ParrotError::Other("failed to fetch playlist"))?;
 
             for url in urls.iter() {
-                let Ok(queue) = enqueue_track(&call, &QueryType::VideoLink(url.to_string())).await
+                let Ok(queue) = enqueue_track(call, &QueryType::VideoLink(url.to_string())).await
                 else {
                     continue;
                 };
@@ -497,8 +497,7 @@ pub async fn normal_query_type_resolver(
         }
         QueryType::KeywordList(keywords_list) => {
             for keywords in keywords_list.iter() {
-                let queue =
-                    enqueue_track(&call, &QueryType::Keywords(keywords.to_string())).await?;
+                let queue = enqueue_track(call, &QueryType::Keywords(keywords.to_string())).await?;
                 update_queue_messages(http, data, &queue, guild_id).await;
             }
             Ok(())

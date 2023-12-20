@@ -59,7 +59,7 @@ impl EventHandler for TrackEndHandler {
                 let stored_queue = guild_stored_queue.queue.clone();
 
                 for item in stored_queue {
-                    match normal_query_type_resolver(
+                    if let Err(err) = normal_query_type_resolver(
                         &self.call,
                         &self.http,
                         &self.ctx_data,
@@ -69,8 +69,7 @@ impl EventHandler for TrackEndHandler {
                     )
                     .await
                     {
-                        Err(err) => println!("{}", err),
-                        _ => (),
+                        println!("{}", err);
                     }
                 }
             }
