@@ -34,15 +34,16 @@ pub struct ModifyQueueHandler {
 impl EventHandler for TrackEndHandler {
     async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event> {
         let data_rlock = self.ctx_data.read().await;
-        let settings = data_rlock.get::<GuildSettingsMap>().unwrap();
-        let stored_queue = data_rlock.get::<GuildStoredQueueMap>().unwrap();
-
-        let guild_stored_queue = stored_queue.get(&self.guild_id).unwrap();
-
-        let (autopause, queue_loop) = settings
+        let (autopause, queue_loop) = data_rlock
+            .get::<GuildSettingsMap>()?
             .get(&self.guild_id)
-            .map(|guild_settings| (guild_settings.autopause, guild_settings.queue_loop))
+            .map(|setting| (setting.autopause, setting.queue_loop))
             .unwrap_or_default();
+        let guild_stored_queue = data_rlock
+            .get::<GuildStoredQueueMap>()?
+            .get(&self.guild_id)?
+            .clone();
+        drop(data_rlock);
 
         if autopause {
             let handler = self.call.lock().await;
@@ -56,9 +57,7 @@ impl EventHandler for TrackEndHandler {
             drop(handler);
 
             if is_queue_empty {
-                let stored_queue = guild_stored_queue.queue.clone();
-
-                for item in stored_queue {
+                for item in guild_stored_queue.queue {
                     if let Err(err) = normal_query_type_resolver(
                         &self.call,
                         &self.http,
@@ -75,7 +74,6 @@ impl EventHandler for TrackEndHandler {
             }
         }
 
-        drop(data_rlock);
         forget_skip_votes(&self.ctx_data, self.guild_id).await.ok();
 
         None

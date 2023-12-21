@@ -5,7 +5,7 @@ use songbird::typemap::TypeMapKey;
 
 use crate::commands::play::QueryType;
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct GuildStoredQueue {
     pub continue_play: bool,
     pub queue: Vec<QueryType>,
