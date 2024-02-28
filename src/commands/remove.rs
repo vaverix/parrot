@@ -1,10 +1,9 @@
 use crate::{
     errors::{verify, ParrotError},
+    guild::stored_queue::GuildStoredQueueMap,
     handlers::track_end::update_queue_messages,
-    messaging::message::ParrotMessage,
-    messaging::messages::REMOVED_QUEUE,
-    utils::create_embed_response,
-    utils::create_response,
+    messaging::{message::ParrotMessage, messages::REMOVED_QUEUE},
+    utils::{create_embed_response, create_response},
 };
 use serenity::{
     builder::CreateEmbed, client::Context,
@@ -59,14 +58,22 @@ pub async fn remove(
     )?;
 
     let track = queue.get(remove_index).unwrap();
+    let mut data = ctx.data.write().await;
+    let guild_stored_queue = data
+        .get_mut::<GuildStoredQueueMap>()
+        .unwrap()
+        .get_mut(&guild_id)
+        .unwrap();
 
     handler.queue().modify_queue(|v| {
         v.drain(remove_index..=remove_until);
+        guild_stored_queue.queue.drain(remove_index..=remove_until);
     });
 
     // refetch the queue after modification
     let queue = handler.queue().current_queue();
     drop(handler);
+    drop(data);
 
     if remove_until == remove_index {
         let embed = create_remove_enqueued_embed(track).await;
