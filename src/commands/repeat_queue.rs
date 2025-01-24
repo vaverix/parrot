@@ -1,7 +1,4 @@
-use serenity::{
-    client::Context,
-    model::application::interaction::application_command::ApplicationCommandInteraction,
-};
+use serenity::{all::CommandInteraction, client::Context};
 
 use crate::{
     errors::ParrotError,
@@ -12,7 +9,7 @@ use crate::{
 
 pub async fn repeat_queue(
     ctx: &Context,
-    interaction: &mut ApplicationCommandInteraction,
+    interaction: &mut CommandInteraction,
 ) -> Result<(), ParrotError> {
     let guild_id = interaction.guild_id.unwrap();
     let mut data = ctx.data.write().await;

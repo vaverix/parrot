@@ -1,4 +1,5 @@
 use serenity::{
+    all::{CreateActionRow, EditMessage},
     async_trait,
     http::Http,
     model::id::GuildId,
@@ -10,7 +11,9 @@ use std::sync::Arc;
 use crate::{
     commands::{
         play::{normal_query_type_resolver, Mode},
-        queue::{build_nav_btns, calculate_num_pages, create_queue_embed, forget_queue_message},
+        queue::{
+            build_single_nav_btn, calculate_num_pages, create_queue_embed, forget_queue_message,
+        },
         voteskip::forget_skip_votes,
     },
     guild::{cache::GuildCacheMap, settings::GuildSettingsMap, stored_queue::GuildStoredQueueMap},
@@ -113,17 +116,30 @@ pub async fn update_queue_messages(
         let mut page = page_lock.write().await;
         *page = usize::min(*page, num_pages - 1);
 
-        let embed = create_queue_embed(tracks, *page);
+        let embed = create_queue_embed(tracks, *page).await;
 
         let edit_message = message
-            .edit(&http, |edit| {
-                edit.set_embed(embed);
-                edit.components(|components| build_nav_btns(components, *page, num_pages))
-            })
+            .edit(
+                &http,
+                build_nav_btns(EditMessage::new().add_embed(embed), *page, num_pages),
+            )
             .await;
 
         if edit_message.is_err() {
             forget_queue_message(ctx_data, message, guild_id).await.ok();
         };
     }
+}
+
+pub fn build_nav_btns(message: EditMessage, page: usize, num_pages: usize) -> EditMessage {
+    let (cant_left, cant_right) = (page < 1, page >= num_pages - 1);
+
+    let components = vec![CreateActionRow::Buttons(vec![
+        build_single_nav_btn("<<", cant_left),
+        build_single_nav_btn("<", cant_left),
+        build_single_nav_btn(">", cant_right),
+        build_single_nav_btn(">>", cant_right),
+    ])];
+
+    message.components(components)
 }

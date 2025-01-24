@@ -4,11 +4,7 @@ use crate::{
 };
 use serde_json::Value;
 use serenity::async_trait;
-use songbird::input::{
-    error::{Error as SongbirdError, Result as SongbirdResult},
-    restartable::Restart,
-    Codec, Container, Input, Metadata, Restartable,
-};
+use songbird::input::{codecs::RawReader, Input, Metadata, YoutubeDl};
 use std::{
     io::{BufRead, BufReader, Read},
     process::Command,
@@ -34,19 +30,15 @@ impl YouTube {
 pub struct YouTubeRestartable {}
 
 impl YouTubeRestartable {
-    pub async fn ytdl<P: AsRef<str> + Send + Clone + Sync + 'static>(
-        uri: P,
-        lazy: bool,
-    ) -> SongbirdResult<Restartable> {
-        Restartable::new(YouTubeRestarter { uri }, lazy).await
+    pub async fn ytdl<P: AsRef<str> + Send + Clone + Sync + 'static>(uri: P) -> Input {
+        YoutubeDl::new(client, url)
     }
 
     pub async fn ytdl_search<P: AsRef<str> + Send + Clone + Sync + 'static>(
         uri: P,
-        lazy: bool,
-    ) -> SongbirdResult<Restartable> {
+    ) -> Result<Input> {
         let uri = format!("ytsearch:{}", uri.as_ref());
-        Restartable::new(YouTubeRestarter { uri }, lazy).await
+        Input::new(YouTubeRestarter { uri }, lazy).await
     }
 
     pub async fn ytdl_playlist(uri: &str, mode: Mode) -> Option<Vec<String>> {
@@ -106,7 +98,7 @@ where
         ffmpeg(yt, metadata, &["-ss", &ts]).await
     }
 
-    async fn lazy_init(&mut self) -> SongbirdResult<(Option<Metadata>, Codec, Container)> {
+    async fn lazy_init(&mut self) -> SongbirdResult<(Option<Metadata>, Codec, RawReader)> {
         _ytdl_metadata(self.uri.as_ref())
             .await
             .map(|m| (Some(m), Codec::FloatPcm, Container::Raw))

@@ -6,34 +6,38 @@ use crate::{
         stored_queue::{GuildStoredQueue, GuildStoredQueueMap},
     },
     handlers::track_end::update_queue_messages,
-    messaging::message::ParrotMessage,
-    messaging::messages::{
-        PLAY_QUEUE, PLAY_TOP, SPOTIFY_AUTH_FAILED, TRACK_DURATION, TRACK_TIME_TO_PLAY,
+    messaging::{
+        message::ParrotMessage,
+        messages::{PLAY_QUEUE, PLAY_TOP, SPOTIFY_AUTH_FAILED, TRACK_DURATION, TRACK_TIME_TO_PLAY},
     },
-    sources::{
-        spotify::{Spotify, SPOTIFY},
-        youtube::{YouTube, YouTubeRestartable},
-    },
+    sources::spotify::{Spotify, SPOTIFY},
     utils::{
         compare_domains, create_now_playing_embed, create_response, edit_embed_response,
-        edit_response, get_human_readable_timestamp,
+        edit_response, get_human_readable_timestamp, AuxMetadataTypeMapKey,
     },
 };
 use serenity::{
+    all::{CommandInteraction, CreateEmbedFooter},
     builder::CreateEmbed,
     client::Context,
+    futures::executor::block_on,
     http::Http,
-    model::{
-        application::interaction::application_command::ApplicationCommandInteraction, id::GuildId,
-    },
+    model::id::GuildId,
     prelude::Mutex,
 };
-use songbird::{input::Restartable, tracks::TrackHandle, typemap::TypeMap, Call};
+use songbird::{
+    input::{Compose, YoutubeDl},
+    tracks::TrackHandle,
+    typemap::TypeMap,
+    Call,
+};
 use std::{cmp::Ordering, error::Error as StdError, sync::Arc, time::Duration};
 use tokio::sync::RwLock;
 use url::Url;
 
-#[derive(Clone, Copy)]
+use reqwest;
+
+#[derive(Clone, Copy, Debug)]
 pub enum Mode {
     End,
     Next,
@@ -51,10 +55,7 @@ pub enum QueryType {
     PlaylistLink(String),
 }
 
-pub async fn play(
-    ctx: &Context,
-    interaction: &mut ApplicationCommandInteraction,
-) -> Result<(), ParrotError> {
+pub async fn play(ctx: &Context, interaction: &mut CommandInteraction) -> Result<(), ParrotError> {
     let args = interaction.data.options.clone();
     let first_arg = args.first().unwrap();
 
@@ -68,16 +69,8 @@ pub async fn play(
     };
 
     let url = match mode {
-        Mode::End => first_arg.value.as_ref().unwrap().as_str().unwrap(),
-        _ => first_arg
-            .options
-            .first()
-            .unwrap()
-            .value
-            .as_ref()
-            .unwrap()
-            .as_str()
-            .unwrap(),
+        Mode::End => first_arg.value.as_str().unwrap(),
+        _ => first_arg.value.as_str().unwrap(),
     };
 
     let guild_id = interaction.guild_id.unwrap();
@@ -123,7 +116,11 @@ pub async fn play(
                     .await;
                 }
 
-                YouTube::extract(url)
+                if url.contains("list=") {
+                    Some(QueryType::PlaylistLink(url.to_string()))
+                } else {
+                    Some(QueryType::VideoLink(url.to_string()))
+                }
             }
             None => None,
         },
@@ -186,11 +183,9 @@ pub async fn play(
                 update_queue_messages(&ctx.http, &ctx.data, &queue, guild_id).await;
             }
             QueryType::PlaylistLink(url) => {
-                let urls = YouTubeRestartable::ytdl_playlist(&url, mode)
-                    .await
-                    .ok_or(ParrotError::Other("failed to fetch playlist"))?;
+                let urls = get_urls_from_playlist(url, None).await?;
 
-                for (idx, url) in urls.into_iter().enumerate() {
+                for (idx, url) in urls.into_iter().filter_map(|v| v).enumerate() {
                     let Ok(queue) = insert_track(&call, &QueryType::VideoLink(url), idx + 1).await
                     else {
                         continue;
@@ -218,13 +213,11 @@ pub async fn play(
                 update_queue_messages(&ctx.http, &ctx.data, &queue, guild_id).await;
             }
             QueryType::PlaylistLink(url) => {
-                let urls = YouTubeRestartable::ytdl_playlist(&url, mode)
-                    .await
-                    .ok_or(ParrotError::Other("failed to fetch playlist"))?;
+                let urls = get_urls_from_playlist(url, None).await?;
 
                 let mut insert_idx = 1;
 
-                for (i, url) in urls.into_iter().enumerate() {
+                for (i, url) in urls.into_iter().filter_map(|v| v).enumerate() {
                     let Ok(mut queue) =
                         insert_track(&call, &QueryType::VideoLink(url), insert_idx).await
                     else {
@@ -259,11 +252,9 @@ pub async fn play(
         },
         Mode::All | Mode::Reverse | Mode::Shuffle => match query_type.clone() {
             QueryType::VideoLink(url) | QueryType::PlaylistLink(url) => {
-                let urls = YouTubeRestartable::ytdl_playlist(&url, mode)
-                    .await
-                    .ok_or(ParrotError::Other("failed to fetch playlist"))?;
+                let urls = get_urls_from_playlist(url, None).await?;
 
-                for url in urls.into_iter() {
+                for url in urls.into_iter().filter_map(|v| v) {
                     let Ok(queue) = enqueue_track(&call, &QueryType::VideoLink(url)).await else {
                         continue;
                     };
@@ -331,8 +322,12 @@ async fn calculate_time_until_play(queue: &[TrackHandle], mode: Mode) -> Option<
 
     let top_track = queue.first()?;
     let top_track_elapsed = top_track.get_info().await.unwrap().position;
+    let top_track_typemap_read_lock = top_track.typemap().read().await;
+    let top_track_aux_metadata = top_track_typemap_read_lock
+        .get::<AuxMetadataTypeMapKey>()
+        .unwrap();
 
-    let top_track_duration = match top_track.metadata().duration {
+    let top_track_duration = match top_track_aux_metadata.duration {
         Some(duration) => duration,
         None => return Some(Duration::MAX),
     };
@@ -341,8 +336,20 @@ async fn calculate_time_until_play(queue: &[TrackHandle], mode: Mode) -> Option<
         Mode::Next => Some(top_track_duration - top_track_elapsed),
         _ => {
             let center = &queue[1..queue.len() - 1];
-            let livestreams =
-                center.len() - center.iter().filter_map(|t| t.metadata().duration).count();
+            let livestreams = center.len()
+                - center
+                    .iter()
+                    .filter_map(|t| {
+                        block_on(async {
+                            t.typemap()
+                                .read()
+                                .await
+                                .get::<AuxMetadataTypeMapKey>()
+                                .unwrap()
+                                .duration
+                        })
+                    })
+                    .count();
 
             // if any of the tracks before are livestreams, the new track will never play
             if livestreams > 0 {
@@ -350,7 +357,15 @@ async fn calculate_time_until_play(queue: &[TrackHandle], mode: Mode) -> Option<
             }
 
             let durations = center.iter().fold(Duration::ZERO, |acc, x| {
-                acc + x.metadata().duration.unwrap()
+                let duration = block_on(async {
+                    x.typemap()
+                        .read()
+                        .await
+                        .get::<AuxMetadataTypeMapKey>()
+                        .unwrap()
+                        .duration
+                });
+                acc + duration.unwrap()
             });
 
             Some(durations + top_track_duration - top_track_elapsed)
@@ -363,12 +378,14 @@ async fn create_queued_embed(
     track: &TrackHandle,
     estimated_time: Duration,
 ) -> CreateEmbed {
-    let mut embed = CreateEmbed::default();
-    let metadata = track.metadata().clone();
+    let embed = CreateEmbed::default();
+    let track_typemap_read_lock = track.typemap().read().await;
+    let metadata = track_typemap_read_lock
+        .get::<AuxMetadataTypeMapKey>()
+        .unwrap()
+        .clone();
 
-    embed.thumbnail(&metadata.thumbnail.unwrap());
-
-    embed.field(
+    let embed = embed.thumbnail(&metadata.thumbnail.unwrap()).field(
         title,
         &format!(
             "[**{}**]({})",
@@ -386,20 +403,17 @@ async fn create_queued_embed(
         get_human_readable_timestamp(Some(estimated_time))
     );
 
-    embed.footer(|footer| footer.text(footer_text));
+    let embed = embed.footer(CreateEmbedFooter::new(footer_text));
     embed
 }
 
-async fn get_track_source(query_type: QueryType) -> Result<Restartable, ParrotError> {
+fn get_track_source(query_type: QueryType) -> YoutubeDl {
+    let http_client = reqwest::Client::new();
+
     match query_type {
-        QueryType::VideoLink(query) => YouTubeRestartable::ytdl(query, true)
-            .await
-            .map_err(ParrotError::TrackFail),
+        QueryType::VideoLink(url) => YoutubeDl::new(http_client, url),
 
-        QueryType::Keywords(query) => YouTubeRestartable::ytdl_search(query, true)
-            .await
-            .map_err(ParrotError::TrackFail),
-
+        QueryType::Keywords(query) => YoutubeDl::new_search(http_client, query),
         _ => unreachable!(),
     }
 }
@@ -408,11 +422,19 @@ async fn enqueue_track(
     call: &Arc<Mutex<Call>>,
     query_type: &QueryType,
 ) -> Result<Vec<TrackHandle>, ParrotError> {
-    // safeguard against ytdl dying on a private/deleted video and killing the playlist
-    let source = get_track_source(query_type.clone()).await?;
+    let source = get_track_source(query_type.clone());
 
+    let mut source_c = source.clone();
     let mut handler = call.lock().await;
-    handler.enqueue_source(source.into());
+    let track_handler = handler.enqueue_input(source.clone().into()).await;
+
+    let mut track_handle_typemap = track_handler.typemap().write().await;
+    track_handle_typemap.insert::<AuxMetadataTypeMapKey>(
+        source_c
+            .aux_metadata()
+            .await
+            .map_err(|_| ParrotError::Other("Unable to get AuxMetadata"))?,
+    );
 
     Ok(handler.queue().current_queue())
 }
@@ -482,11 +504,9 @@ pub async fn normal_query_type_resolver(
             Ok(())
         }
         QueryType::PlaylistLink(url) => {
-            let urls = YouTubeRestartable::ytdl_playlist(&url, mode)
-                .await
-                .ok_or(ParrotError::Other("failed to fetch playlist"))?;
+            let urls = get_urls_from_playlist(url, Some(mode)).await?;
 
-            for url in urls.iter() {
+            for url in urls.iter().filter_map(|v| v.clone()) {
                 let Ok(queue) = enqueue_track(call, &QueryType::VideoLink(url.to_string())).await
                 else {
                     continue;
@@ -503,4 +523,34 @@ pub async fn normal_query_type_resolver(
             Ok(())
         }
     }
+}
+
+pub async fn get_urls_from_playlist(
+    url: String,
+    mode: Option<Mode>,
+) -> Result<Vec<Option<String>>, ParrotError> {
+    let ytdl = YoutubeDl::new(reqwest::Client::new(), url);
+    let mut args = vec!["--flat-playlist", "-j"];
+
+    if let Some(mode) = mode {
+        match mode {
+            Mode::Reverse => args.push("--playlist-reverse"),
+            Mode::Shuffle => args.push("--playlist-random"),
+            _ => {}
+        }
+    }
+
+    let mut ytdl = ytdl.user_args(args.iter().map(|v| (*v).to_owned()).collect());
+
+    let result = ytdl
+        .search(None)
+        .await
+        .map_err(|_| ParrotError::Other("Failed to fetch playlist"))
+        .ok()
+        .unwrap()
+        .iter()
+        .map(|v| v.source_url.clone())
+        .collect();
+
+    Ok(result)
 }
