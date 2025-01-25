@@ -148,7 +148,7 @@ pub async fn create_queue_embed(tracks: &[TrackHandle], page: usize) -> CreateEm
 
     embed = embed
         .field(QUEUE_NOW_PLAYING, &description, false)
-        .field(QUEUE_UP_NEXT, &build_queue_page(tracks, page).await, false)
+        .field(QUEUE_UP_NEXT, build_queue_page(tracks, page).await, false)
         .footer(CreateEmbedFooter::new(format!(
             "{} {} {} {}",
             QUEUE_PAGE,
@@ -161,13 +161,11 @@ pub async fn create_queue_embed(tracks: &[TrackHandle], page: usize) -> CreateEm
 }
 
 pub fn build_single_nav_btn(label: &str, is_disabled: bool) -> CreateButton {
-    let button = CreateButton::new(label.to_string().to_ascii_lowercase())
+    CreateButton::new(label.to_string().to_ascii_lowercase())
         .label(label)
         .style(ButtonStyle::Primary)
         .disabled(is_disabled)
-        .to_owned();
-
-    button
+        .to_owned()
 }
 
 pub fn build_nav_btns(

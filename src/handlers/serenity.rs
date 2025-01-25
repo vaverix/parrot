@@ -18,11 +18,7 @@ use serenity::{
     },
     async_trait,
     client::{Context, EventHandler},
-    model::{
-        gateway::Ready,
-        id::GuildId,
-        prelude::{Activity, VoiceState},
-    },
+    model::{gateway::Ready, id::GuildId, prelude::VoiceState},
     prelude::Mentionable,
 };
 

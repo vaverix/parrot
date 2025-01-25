@@ -9,10 +9,7 @@ use serenity::{
     prelude::TypeMapKey,
     Error,
 };
-use songbird::{
-    input::{AuxMetadata, Input},
-    tracks::{Track, TrackHandle},
-};
+use songbird::{input::AuxMetadata, tracks::TrackHandle};
 use std::{sync::Arc, time::Duration};
 use url::Url;
 
@@ -77,15 +74,14 @@ pub async fn create_embed_response(
     {
         Ok(val) => Ok(val),
         Err(err) => match err {
-            ParrotError::Serenity(Error::Http(ref e)) => match &e {
-                HttpError::UnsuccessfulRequest(req) => match req.error.code {
+            ParrotError::Serenity(Error::Http(HttpError::UnsuccessfulRequest(ref req))) => {
+                match req.error.code {
                     40060 => edit_embed_response(http, interaction, embed)
                         .await
                         .map(|_| ()),
                     _ => Err(err),
-                },
-                _ => Err(err),
-            },
+                }
+            }
             _ => Err(err),
         },
     }
@@ -103,15 +99,14 @@ pub async fn edit_embed_response(
 }
 
 pub async fn create_now_playing_embed(track: &TrackHandle) -> CreateEmbed {
-    let embed = CreateEmbed::default();
+    let mut embed = CreateEmbed::default();
     let track_typemap_read_lock = track.typemap().read().await;
     let metadata = track_typemap_read_lock
         .get::<AuxMetadataTypeMapKey>()
         .unwrap()
         .clone();
 
-    // embed.author(|author| author.name(ParrotMessage::NowPlaying));
-    let embed = embed
+    embed = embed
         .author(CreateEmbedAuthor::new(format!(
             "{}",
             ParrotMessage::NowPlaying
@@ -122,21 +117,20 @@ pub async fn create_now_playing_embed(track: &TrackHandle) -> CreateEmbed {
     let position = get_human_readable_timestamp(Some(track.get_info().await.unwrap().position));
     let duration = get_human_readable_timestamp(metadata.duration);
 
-    let embed = embed.field("Progress", format!(">>> {} / {}", position, duration), true);
+    embed = embed.field("Progress", format!(">>> {} / {}", position, duration), true);
 
-    let embed = match metadata.channel {
+    embed = match metadata.channel {
         Some(channel) => embed.field("Channel", format!(">>> {}", channel), true),
         None => embed.field("Channel", ">>> N/A", true),
     };
 
-    let embed = embed.thumbnail(&metadata.thumbnail.unwrap());
+    embed = embed.thumbnail(metadata.thumbnail.unwrap());
 
     let source_url = metadata.source_url.unwrap();
 
     let (footer_text, footer_icon_url) = get_footer_info(&source_url);
-    let embed = embed.footer(CreateEmbedFooter::new(footer_text).icon_url(footer_icon_url));
 
-    embed
+    embed.footer(CreateEmbedFooter::new(footer_text).icon_url(footer_icon_url))
 }
 
 pub fn get_footer_info(url: &str) -> (String, String) {

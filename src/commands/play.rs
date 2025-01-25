@@ -185,7 +185,7 @@ pub async fn play(ctx: &Context, interaction: &mut CommandInteraction) -> Result
             QueryType::PlaylistLink(url) => {
                 let urls = get_urls_from_playlist(url, None).await?;
 
-                for (idx, url) in urls.into_iter().filter_map(|v| v).enumerate() {
+                for (idx, url) in urls.into_iter().flatten().enumerate() {
                     let Ok(queue) = insert_track(&call, &QueryType::VideoLink(url), idx + 1).await
                     else {
                         continue;
@@ -217,7 +217,7 @@ pub async fn play(ctx: &Context, interaction: &mut CommandInteraction) -> Result
 
                 let mut insert_idx = 1;
 
-                for (i, url) in urls.into_iter().filter_map(|v| v).enumerate() {
+                for (i, url) in urls.into_iter().flatten().enumerate() {
                     let Ok(mut queue) =
                         insert_track(&call, &QueryType::VideoLink(url), insert_idx).await
                     else {
@@ -254,7 +254,7 @@ pub async fn play(ctx: &Context, interaction: &mut CommandInteraction) -> Result
             QueryType::VideoLink(url) | QueryType::PlaylistLink(url) => {
                 let urls = get_urls_from_playlist(url, None).await?;
 
-                for url in urls.into_iter().filter_map(|v| v) {
+                for url in urls.into_iter().flatten() {
                     let Ok(queue) = enqueue_track(&call, &QueryType::VideoLink(url)).await else {
                         continue;
                     };
@@ -378,16 +378,16 @@ async fn create_queued_embed(
     track: &TrackHandle,
     estimated_time: Duration,
 ) -> CreateEmbed {
-    let embed = CreateEmbed::default();
+    let mut embed = CreateEmbed::default();
     let track_typemap_read_lock = track.typemap().read().await;
     let metadata = track_typemap_read_lock
         .get::<AuxMetadataTypeMapKey>()
         .unwrap()
         .clone();
 
-    let embed = embed.thumbnail(&metadata.thumbnail.unwrap()).field(
+    embed = embed.thumbnail(metadata.thumbnail.unwrap()).field(
         title,
-        &format!(
+        format!(
             "[**{}**]({})",
             metadata.title.unwrap(),
             metadata.source_url.unwrap()
@@ -403,8 +403,7 @@ async fn create_queued_embed(
         get_human_readable_timestamp(Some(estimated_time))
     );
 
-    let embed = embed.footer(CreateEmbedFooter::new(footer_text));
-    embed
+    embed.footer(CreateEmbedFooter::new(footer_text))
 }
 
 fn get_track_source(query_type: QueryType) -> YoutubeDl {

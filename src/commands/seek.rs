@@ -33,7 +33,7 @@ pub async fn seek(ctx: &Context, interaction: &mut CommandInteraction) -> Result
         .ok_or(ParrotError::NothingPlaying)?;
     drop(handler);
 
-    track.seek(Duration::from_secs(timestamp));
+    let _ = track.seek(Duration::from_secs(timestamp));
 
     create_response(
         &ctx.http,

@@ -8,10 +8,10 @@ use crate::{
 };
 use serenity::{
     all::{
-        ActionRow, ActionRowComponent, CommandInteraction, CreateActionRow,
-        CreateInteractionResponse, CreateModal, InputTextStyle, ModalInteractionCollector,
+        ActionRowComponent, CommandInteraction, CreateActionRow, CreateInteractionResponse,
+        CreateModal, InputTextStyle, ModalInteractionCollector,
     },
-    builder::{self, CreateInputText},
+    builder::CreateInputText,
     client::Context,
     futures::StreamExt,
 };

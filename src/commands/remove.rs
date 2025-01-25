@@ -35,14 +35,14 @@ pub async fn remove(
     verify(queue_len > 1, ParrotError::QueueEmpty)?;
     verify(
         remove_index < queue_len,
-        ParrotError::NotInRange("index", remove_index as isize, 1, queue_len as isize),
+        ParrotError::NotInRange("index", remove_index, 1, queue_len as isize),
     )?;
     verify(
         remove_until >= remove_index,
         ParrotError::NotInRange(
             "until",
             remove_until as isize,
-            remove_index as isize,
+            remove_index,
             queue_len as isize,
         ),
     )?;
@@ -79,24 +79,22 @@ pub async fn remove(
 }
 
 async fn create_remove_enqueued_embed(track: &TrackHandle) -> CreateEmbed {
-    let mut embed = CreateEmbed::default();
+    let embed = CreateEmbed::default();
     let track_typemap_read_lock = track.typemap().read().await;
     let metadata = track_typemap_read_lock
         .get::<AuxMetadataTypeMapKey>()
         .unwrap()
         .clone();
 
-    embed = embed
+    embed
         .field(
             REMOVED_QUEUE,
-            &format!(
+            format!(
                 "[**{}**]({})",
                 metadata.title.unwrap(),
                 metadata.source_url.unwrap()
             ),
             false,
         )
-        .thumbnail(&metadata.thumbnail.unwrap());
-
-    embed
+        .thumbnail(metadata.thumbnail.unwrap())
 }
