@@ -41,3 +41,7 @@ features = [
 [dependencies.tokio]
 version = "1.17.0"
 features = ["macros", "rt-multi-thread"]
+
+[dependencies.symphonia]
+version = "0.5.2"
+features = ["aac", "mp3", "isomp4", "alac"]
