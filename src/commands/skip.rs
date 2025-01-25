@@ -1,27 +1,21 @@
 use crate::{
     errors::{verify, ParrotError},
     messaging::message::ParrotMessage,
-    utils::create_response,
+    utils::{create_response, AuxMetadataTypeMapKey},
 };
-use serenity::{
-    client::Context,
-    model::application::interaction::application_command::ApplicationCommandInteraction,
-};
+use serenity::{all::CommandInteraction, client::Context};
 use songbird::{tracks::TrackHandle, Call};
 use std::cmp::min;
 use tokio::sync::MutexGuard;
 
-pub async fn skip(
-    ctx: &Context,
-    interaction: &mut ApplicationCommandInteraction,
-) -> Result<(), ParrotError> {
+pub async fn skip(ctx: &Context, interaction: &mut CommandInteraction) -> Result<(), ParrotError> {
     let guild_id = interaction.guild_id.unwrap();
     let manager = songbird::get(ctx).await.unwrap();
     let call = manager.get(guild_id).unwrap();
 
     let args = interaction.data.options.clone();
     let to_skip = match args.first() {
-        Some(arg) => arg.value.as_ref().unwrap().as_u64().unwrap() as usize,
+        Some(arg) => arg.value.as_i64().unwrap() as usize,
         None => 1,
     };
 
@@ -42,18 +36,24 @@ pub async fn skip(
 
 pub async fn create_skip_response(
     ctx: &Context,
-    interaction: &mut ApplicationCommandInteraction,
+    interaction: &mut CommandInteraction,
     handler: &MutexGuard<'_, Call>,
     tracks_to_skip: usize,
 ) -> Result<(), ParrotError> {
     match handler.queue().current() {
         Some(track) => {
+            let track_typemap_read_lock = track.typemap().read().await;
+            let metadata = track_typemap_read_lock
+                .get::<AuxMetadataTypeMapKey>()
+                .unwrap()
+                .clone();
+
             create_response(
                 &ctx.http,
                 interaction,
                 ParrotMessage::SkipTo {
-                    title: track.metadata().title.as_ref().unwrap().to_owned(),
-                    url: track.metadata().source_url.as_ref().unwrap().to_owned(),
+                    title: metadata.title.unwrap(),
+                    url: metadata.source_url.unwrap(),
                 },
             )
             .await
@@ -76,7 +76,7 @@ pub async fn force_skip_top_track(
     // also, manually removing tracks doesn't trigger the next track to play
     // so first, stop the top song, manually remove it and then resume playback
     handler.queue().current().unwrap().stop().ok();
-    handler.queue().dequeue(0);
+    let _ = handler.queue().dequeue(0);
     handler.queue().resume().ok();
 
     Ok(handler.queue().current_queue())

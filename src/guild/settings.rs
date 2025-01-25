@@ -25,6 +25,7 @@ pub struct GuildSettings {
     pub autopause: bool,
     pub allowed_domains: HashSet<String>,
     pub banned_domains: HashSet<String>,
+    pub queue_loop: bool,
 }
 
 impl GuildSettings {
@@ -37,6 +38,7 @@ impl GuildSettings {
         GuildSettings {
             guild_id,
             autopause: false,
+            queue_loop: false,
             allowed_domains,
             banned_domains: HashSet::new(),
         }
@@ -75,6 +77,10 @@ impl GuildSettings {
 
     pub fn toggle_autopause(&mut self) {
         self.autopause = !self.autopause;
+    }
+
+    pub fn toggle_queue_loop(&mut self) {
+        self.queue_loop = !self.queue_loop;
     }
 
     pub fn set_allowed_domains(&mut self, allowed_str: &str) {

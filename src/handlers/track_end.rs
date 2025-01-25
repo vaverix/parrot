@@ -1,4 +1,5 @@
 use serenity::{
+    all::{CreateActionRow, EditMessage},
     async_trait,
     http::Http,
     model::id::GuildId,
@@ -9,13 +10,17 @@ use std::sync::Arc;
 
 use crate::{
     commands::{
-        queue::{build_nav_btns, calculate_num_pages, create_queue_embed, forget_queue_message},
+        play::{normal_query_type_resolver, Mode},
+        queue::{
+            build_single_nav_btn, calculate_num_pages, create_queue_embed, forget_queue_message,
+        },
         voteskip::forget_skip_votes,
     },
-    guild::{cache::GuildCacheMap, settings::GuildSettingsMap},
+    guild::{cache::GuildCacheMap, settings::GuildSettingsMap, stored_queue::GuildStoredQueueMap},
 };
 
 pub struct TrackEndHandler {
+    pub http: Arc<Http>,
     pub guild_id: GuildId,
     pub call: Arc<Mutex<Call>>,
     pub ctx_data: Arc<RwLock<TypeMap>>,
@@ -32,20 +37,46 @@ pub struct ModifyQueueHandler {
 impl EventHandler for TrackEndHandler {
     async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event> {
         let data_rlock = self.ctx_data.read().await;
-        let settings = data_rlock.get::<GuildSettingsMap>().unwrap();
-
-        let autopause = settings
+        let (autopause, queue_loop) = data_rlock
+            .get::<GuildSettingsMap>()?
             .get(&self.guild_id)
-            .map(|guild_settings| guild_settings.autopause)
+            .map(|setting| (setting.autopause, setting.queue_loop))
             .unwrap_or_default();
+        let guild_stored_queue = data_rlock
+            .get::<GuildStoredQueueMap>()?
+            .get(&self.guild_id)?
+            .clone();
+        drop(data_rlock);
 
         if autopause {
             let handler = self.call.lock().await;
-            let queue = handler.queue();
-            queue.pause().ok();
+            let local_queue = handler.queue();
+            local_queue.pause().ok();
         }
 
-        drop(data_rlock);
+        if queue_loop && guild_stored_queue.continue_play {
+            let handler = self.call.lock().await;
+            let is_queue_empty = handler.queue().is_empty();
+            drop(handler);
+
+            if is_queue_empty {
+                for item in guild_stored_queue.queue {
+                    if let Err(err) = normal_query_type_resolver(
+                        &self.call,
+                        &self.http,
+                        &self.ctx_data,
+                        self.guild_id,
+                        &item,
+                        Mode::End,
+                    )
+                    .await
+                    {
+                        println!("{}", err);
+                    }
+                }
+            }
+        }
+
         forget_skip_votes(&self.ctx_data, self.guild_id).await.ok();
 
         None
@@ -85,17 +116,30 @@ pub async fn update_queue_messages(
         let mut page = page_lock.write().await;
         *page = usize::min(*page, num_pages - 1);
 
-        let embed = create_queue_embed(tracks, *page);
+        let embed = create_queue_embed(tracks, *page).await;
 
         let edit_message = message
-            .edit(&http, |edit| {
-                edit.set_embed(embed);
-                edit.components(|components| build_nav_btns(components, *page, num_pages))
-            })
+            .edit(
+                &http,
+                build_nav_btns(EditMessage::new().add_embed(embed), *page, num_pages),
+            )
             .await;
 
         if edit_message.is_err() {
             forget_queue_message(ctx_data, message, guild_id).await.ok();
         };
     }
+}
+
+pub fn build_nav_btns(message: EditMessage, page: usize, num_pages: usize) -> EditMessage {
+    let (cant_left, cant_right) = (page < 1, page >= num_pages - 1);
+
+    let components = vec![CreateActionRow::Buttons(vec![
+        build_single_nav_btn("<<", cant_left),
+        build_single_nav_btn("<", cant_left),
+        build_single_nav_btn(">", cant_right),
+        build_single_nav_btn(">>", cant_right),
+    ])];
+
+    message.components(components)
 }

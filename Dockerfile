@@ -1,9 +1,11 @@
 # Build image
 # Necessary dependencies to build Parrot
-FROM rust:slim-bullseye as build
+FROM rust:1.74.0-slim-bookworm AS build
 
 RUN apt-get update && apt-get install -y \
-    build-essential autoconf automake cmake libtool libssl-dev pkg-config
+    build-essential autoconf automake cmake libtool libssl-dev pkg-config wget
+
+RUN wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp
 
 WORKDIR "/parrot"
 
@@ -19,10 +21,11 @@ RUN cargo build --release --locked
 
 # Release image
 # Necessary dependencies to run Parrot
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
-RUN apt-get update && apt-get install -y python3-pip ffmpeg
-RUN pip install -U yt-dlp
+RUN apt-get update && apt-get install ffmpeg -y
+COPY --from=build /usr/local/bin/yt-dlp /usr/local/bin/yt-dlp
+RUN chmod a+rx /usr/local/bin/yt-dlp 
 
 COPY --from=build /parrot/target/release/parrot .
 

@@ -5,7 +5,7 @@ use crate::messaging::messages::{
 };
 use rspotify::ClientError as RSpotifyClientError;
 use serenity::{model::mention::Mention, prelude::SerenityError};
-use songbird::input::error::Error as InputError;
+use songbird::error::PlayError;
 use std::fmt::{Debug, Display};
 use std::{error::Error, fmt};
 
@@ -20,7 +20,7 @@ pub enum ParrotError {
     WrongVoiceChannel,
     AuthorNotFound,
     NothingPlaying,
-    TrackFail(InputError),
+    TrackFail(PlayError),
     AlreadyConnected(Mention),
     Serenity(SerenityError),
     RSpotify(RSpotifyClientError),
@@ -54,11 +54,8 @@ impl Display for ParrotError {
             }
             Self::NothingPlaying => f.write_str(NOTHING_IS_PLAYING),
             Self::TrackFail(err) => match err {
-                InputError::Json {
-                    error: _,
-                    parsed_text,
-                } => {
-                    if parsed_text.contains("Sign in to confirm your age") {
+                PlayError::Parse(error) => {
+                    if error.to_string().contains("Sign in to confirm your age") {
                         f.write_str(TRACK_INAPPROPRIATE)
                     } else {
                         f.write_str(TRACK_NOT_FOUND)

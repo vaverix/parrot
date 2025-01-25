@@ -1,12 +1,13 @@
+use serenity::{all::CommandInteraction, client::Context};
+
 use crate::{
     errors::ParrotError,
     guild::settings::{GuildSettings, GuildSettingsMap},
     messaging::message::ParrotMessage,
     utils::create_response,
 };
-use serenity::{all::CommandInteraction, client::Context};
 
-pub async fn autopause(
+pub async fn repeat_queue(
     ctx: &Context,
     interaction: &mut CommandInteraction,
 ) -> Result<(), ParrotError> {
@@ -14,15 +15,18 @@ pub async fn autopause(
     let mut data = ctx.data.write().await;
     let settings = data.get_mut::<GuildSettingsMap>().unwrap();
 
-    let guild_settings = settings
+    let guild_setting = settings
         .entry(guild_id)
         .or_insert_with(|| GuildSettings::new(guild_id));
-    guild_settings.toggle_autopause();
-    guild_settings.save()?;
+    guild_setting.toggle_queue_loop();
+    guild_setting.save()?;
+    let is_queue_loop = guild_setting.queue_loop;
 
-    if guild_settings.autopause {
-        create_response(&ctx.http, interaction, ParrotMessage::AutopauseOn).await
+    drop(data);
+
+    if is_queue_loop {
+        create_response(&ctx.http, interaction, ParrotMessage::LoopEnable).await
     } else {
-        create_response(&ctx.http, interaction, ParrotMessage::AutopauseOff).await
+        create_response(&ctx.http, interaction, ParrotMessage::LoopDisable).await
     }
 }
