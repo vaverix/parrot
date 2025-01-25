@@ -309,7 +309,7 @@ pub async fn play(ctx: &Context, interaction: &mut CommandInteraction) -> Result
 
             edit_embed_response(&ctx.http, interaction, embed).await?;
         }
-        _ => unreachable!(),
+        _ => println!("Ignore queue reordering"),
     }
 
     Ok(())
