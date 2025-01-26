@@ -17,6 +17,11 @@ pub async fn leave(ctx: &Context, interaction: &mut CommandInteraction) -> Resul
 
     drop(data);
 
+    let call = manager.get(guild_id).unwrap();
+    let mut handler = call.lock().await;
+    handler.remove_all_global_events();
+    drop(handler);
+
     manager.remove(guild_id).await.unwrap();
 
     create_response(&ctx.http, interaction, ParrotMessage::Leaving).await
